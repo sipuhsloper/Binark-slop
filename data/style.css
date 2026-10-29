@@ -1,0 +1,61 @@
+/* Application-specific refinements on top of Adwaita. */
+
+.binark-heading {
+  font-weight: 800;
+  font-size: 1.55rem;
+}
+
+.binark-subtitle {
+  color: alpha(currentColor, 0.68);
+}
+
+.binark-panel {
+  padding: 12px;
+}
+
+.binark-panel label.binark-panel-title {
+  font-weight: 700;
+}
+
+.binark-text text {
+  font-family: "Adwaita Mono", "Source Code Pro", monospace;
+  font-size: 0.95rem;
+}
+
+.binark-error {
+  color: @error_color;
+  font-weight: 500;
+}
+
+.binark-success {
+  color: @success_color;
+  font-weight: 500;
+}
+
+.binark-stats {
+  color: alpha(currentColor, 0.62);
+  font-size: 0.86rem;
+}
+
+.binark-result {
+  background-color: alpha(@accent_bg_color, 0.055);
+  border-radius: 10px;
+}
+
+.binark-warning {
+  color: @warning_color;
+}
+
+.binark-mono {
+  font-family: "Adwaita Mono", "Source Code Pro", monospace;
+}
+
+.binark-file-path {
+  font-family: "Adwaita Mono", "Source Code Pro", monospace;
+  font-size: 0.87rem;
+}
+
+.binark-caption {
+  color: alpha(currentColor, 0.62);
+  font-size: 0.86rem;
+}

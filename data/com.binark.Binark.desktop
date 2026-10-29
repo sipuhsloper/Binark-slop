@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Binark
+GenericName=Binary Converter
+GenericName[ru]=Бинарный конвертер
+Comment=Convert text, numbers and files to and from binary
+Comment[ru]=Конвертер текста, чисел и файлов в бинарное представление
+Exec=binark
+Icon=com.binark.Binark
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=binary;bits;hex;converter;number;file;binary;
+StartupNotify=true

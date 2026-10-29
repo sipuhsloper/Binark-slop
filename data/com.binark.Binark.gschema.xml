@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="binark">
+  <schema id="com.binark.Binark" path="/com/binark/Binark/">
+    <key name="theme" type="s">
+      <choices>
+        <choice value="system"/>
+        <choice value="light"/>
+        <choice value="dark"/>
+      </choices>
+      <default>'system'</default>
+      <summary>Color theme</summary>
+      <description>Use the system color scheme, force light theme, or force dark theme.</description>
+    </key>
+    <key name="bytes-per-line" type="i">
+      <range min="1" max="64"/>
+      <default>8</default>
+      <summary>Bytes per line</summary>
+      <description>Number of bytes in each line of separated binary output.</description>
+    </key>
+    <key name="separated-bits" type="b">
+      <default>true</default>
+      <summary>Separate bytes</summary>
+      <description>Insert spaces between bytes and wrap binary text output into lines.</description>
+    </key>
+    <key name="hex-uppercase" type="b">
+      <default>true</default>
+      <summary>Uppercase hexadecimal digits</summary>
+      <description>Use uppercase A-F in hexadecimal results.</description>
+    </key>
+    <key name="history-enabled" type="b">
+      <default>true</default>
+      <summary>Save history</summary>
+      <description>Store short descriptions of recent conversions without their contents.</description>
+    </key>
+    <key name="copy-after-convert" type="b">
+      <default>false</default>
+      <summary>Copy result automatically</summary>
+      <description>Copy textual results to the clipboard after a successful conversion.</description>
+    </key>
+    <key name="compact-file-format" type="b">
+      <default>false</default>
+      <summary>Compact file output</summary>
+      <description>Write file bit streams without spaces or line breaks.</description>
+    </key>
+  </schema>
+</schemalist>
