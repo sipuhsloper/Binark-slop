@@ -1,5 +1,18 @@
+# C / C++ build artifacts
 build/
 *.o
 *.d
 *.so
-*.tmp
+*.a
+*.dll
+*.dylib
+
+# GLib / GResource generated sources
+binark-resources.c
+binark-resources.h
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
