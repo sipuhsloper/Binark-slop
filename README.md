@@ -59,12 +59,6 @@ make
 make run
 ```
 
-или запустить собранный файл напрямую:
-
-```bash
-GSETTINGS_SCHEMA_DIR="$PWD/build/gschemas" ./build/binark
-```
-
 ## Установка и удаление
 
 ```bash
