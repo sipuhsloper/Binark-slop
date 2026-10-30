@@ -178,6 +178,70 @@ test_text_invalid(void)
     g_clear_error(&error);
 }
 
+static void
+test_text_base64(void)
+{
+    gchar *encoded;
+    gchar *decoded = NULL;
+    gsize encoded_len = 0;
+    gsize decoded_len = 0;
+    GError *error = NULL;
+
+    encoded = binark_text_encode_base64("Hi", 2, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "SGk=");
+    g_assert_cmpuint(encoded_len, ==, 4);
+    g_free(encoded);
+
+    encoded = binark_text_encode_base64("", 0, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "");
+    g_assert_cmpuint(encoded_len, ==, 0);
+    g_free(encoded);
+
+    g_assert_true(binark_text_decode_base64("SGk=", 4, &decoded, &decoded_len,
+                                            &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(decoded, ==, "Hi");
+    g_assert_cmpuint(decoded_len, ==, 2);
+    g_free(decoded);
+
+    g_assert_false(binark_text_decode_base64("SGk", 3, &decoded, &decoded_len,
+                                             &error));
+    g_assert_error(error, BINARK_TEXT_ERROR, BINARK_TEXT_ERROR_INVALID_CHARACTER);
+    g_clear_error(&error);
+}
+
+static void
+test_text_base32(void)
+{
+    gchar *encoded;
+    gchar *decoded = NULL;
+    gsize encoded_len = 0;
+    gsize decoded_len = 0;
+    GError *error = NULL;
+
+    encoded = binark_text_encode_base32("Hi", 2, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "JBUQ====");
+    g_assert_cmpuint(encoded_len, ==, 8);
+    g_free(encoded);
+
+    encoded = binark_text_encode_base32("", 0, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "");
+    g_assert_cmpuint(encoded_len, ==, 0);
+    g_free(encoded);
+
+    g_assert_true(binark_text_decode_base32("JBUQ====", 8, &decoded, &decoded_len,
+                                            &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(decoded, ==, "Hi");
+    g_assert_cmpuint(decoded_len, ==, 2);
+    g_free(decoded);
+
+    g_assert_false(binark_text_decode_base32("JBUQ", 4, &decoded, &decoded_len,
+                                             &error));
+    g_assert_error(error, BINARK_TEXT_ERROR, BINARK_TEXT_ERROR_INVALID_CHARACTER);
+    g_clear_error(&error);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -191,6 +255,8 @@ main(int argc, char **argv)
     g_test_add_func("/text/decode-whitespace", test_text_decode_whitespace);
     g_test_add_func("/text/incomplete", test_text_incomplete);
     g_test_add_func("/text/invalid", test_text_invalid);
+    g_test_add_func("/text/base64", test_text_base64);
+    g_test_add_func("/text/base32", test_text_base32);
 
     return g_test_run();
 }

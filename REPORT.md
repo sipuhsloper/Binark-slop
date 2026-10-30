@@ -58,8 +58,8 @@
 ## Результаты команд
 
 - `make` (после `make clean`) — **успешно, без ошибок**, exit 0.
-- `make test` — **успешно, 21/21 тестов**, exit 0:
-  - text: 8 ok;
+- `make test` — **успешно, 23/23 тестов**, exit 0:
+  - text: 10 ok;
   - numbers: 7 ok;
   - files: 6 ok.
 - `make install` / `make uninstall` — **успешно, exit 0**.

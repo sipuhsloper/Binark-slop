@@ -42,6 +42,34 @@ gboolean binark_text_decode(const gchar *bits,
                             gsize *text_len,
                             GError **error);
 
+/*
+ * Convert UTF-8 text to standard Base64 (RFC 4648) and back. The result or
+ * input contains only Base64 characters and padding; embedded whitespace is
+ * allowed around the encoded stream.
+ */
+gchar *binark_text_encode_base64(const gchar *text,
+                                 gsize text_len,
+                                 gsize *out_len);
+gboolean binark_text_decode_base64(const gchar *input,
+                                   gsize input_len,
+                                   gchar **text,
+                                   gsize *text_len,
+                                   GError **error);
+
+/*
+ * Convert UTF-8 text to standard Base32 (RFC 4648) and back. The result or
+ * input contains only Base32 characters and padding; embedded whitespace is
+ * allowed around the encoded stream.
+ */
+gchar *binark_text_encode_base32(const gchar *text,
+                                 gsize text_len,
+                                 gsize *out_len);
+gboolean binark_text_decode_base32(const gchar *input,
+                                   gsize input_len,
+                                   gchar **text,
+                                   gsize *text_len,
+                                   GError **error);
+
 G_END_DECLS
 
 #endif /* BINARK_TEXT_CONVERTER_H */
