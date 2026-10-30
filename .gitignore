@@ -16,3 +16,8 @@ binark-resources.h
 Thumbs.db
 *.swp
 *~
+
+# Packaging artifacts (published as release assets, not in git)
+AppDir/
+*.AppImage
+*.exe
