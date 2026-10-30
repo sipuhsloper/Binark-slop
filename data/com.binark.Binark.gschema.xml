@@ -24,8 +24,8 @@
     </key>
     <key name="hex-uppercase" type="b">
       <default>true</default>
-      <summary>Uppercase hexadecimal digits</summary>
-      <description>Use uppercase A-F in hexadecimal results.</description>
+      <summary>Uppercase digits</summary>
+      <description>Use uppercase Latin letters (A-Z) for digits in bases greater than 10.</description>
     </key>
     <key name="history-enabled" type="b">
       <default>true</default>

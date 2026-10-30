@@ -130,13 +130,47 @@ struct _BinarkWindow {
 
 G_DEFINE_TYPE(BinarkWindow, binark_window, ADW_TYPE_APPLICATION_WINDOW)
 
-static const guint bases[] = {2, 8, 10, 16};
-static const gchar *const base_labels[] = {
-    "Двоичная (2)",
-    "Восьмеричная (8)",
-    "Десятичная (10)",
-    "Шестнадцатеричная (16)"
+static const guint number_bases[] = {
+    2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 32, 64
 };
+
+static const gchar *
+number_base_name(guint base)
+{
+    switch (base) {
+    case 2: return "Двоичная";
+    case 3: return "Троичная";
+    case 4: return "Четверичная";
+    case 5: return "Пятеричная";
+    case 6: return "Шестеричная";
+    case 7: return "Семеричная";
+    case 8: return "Восьмеричная";
+    case 9: return "Девятеричная";
+    case 10: return "Десятичная";
+    case 11: return "Одиннадцатеричная";
+    case 12: return "Двенадцатеричная";
+    case 13: return "Тринадцатеричная";
+    case 14: return "Четырнадцатеричная";
+    case 15: return "Пятнадцатеричная";
+    case 16: return "Шестнадцатеричная";
+    case 20: return "Двадцатеричная";
+    case 32: return "Тридцатидвухричная";
+    case 36: return "Тридцатишестиричная";
+    case 60: return "Шестидесятеричная";
+    case 64: return "Шестьдесятчетырёхричная";
+    default: return NULL;
+    }
+}
+
+static gchar *
+number_base_label(guint base)
+{
+    const gchar *name = number_base_name(base);
+
+    if (name != NULL)
+        return g_strdup_printf("%s (%u)", name, base);
+    return g_strdup_printf("Основание %u", base);
+}
 
 static void update_text_direction(BinarkWindow *self);
 static void update_file_direction(BinarkWindow *self);
@@ -580,20 +614,38 @@ on_number_entry_activate(GtkEntry *entry, gpointer user_data)
 }
 
 static GtkDropDown *
-new_base_dropdown(guint selected)
+new_base_dropdown(guint selected_base)
 {
     GtkStringList *model;
     GtkWidget *dropdown;
     guint i;
+    guint selected = 8; /* Десятичная (10) */
 
     model = gtk_string_list_new(NULL);
-    for (i = 0; i < G_N_ELEMENTS(base_labels); i++)
-        gtk_string_list_append(model, base_labels[i]);
+    for (i = 0; i < G_N_ELEMENTS(number_bases); i++) {
+        gchar *label = number_base_label(number_bases[i]);
+
+        gtk_string_list_append(model, label);
+        g_free(label);
+
+        if (number_bases[i] == selected_base)
+            selected = i;
+    }
 
     dropdown = gtk_drop_down_new(G_LIST_MODEL(model), NULL);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(dropdown), selected);
     g_object_unref(model);
     return GTK_DROP_DOWN(dropdown);
+}
+
+static guint
+number_base_value(GtkDropDown *dropdown)
+{
+    guint index = gtk_drop_down_get_selected(dropdown);
+
+    if (index == GTK_INVALID_LIST_POSITION || index >= G_N_ELEMENTS(number_bases))
+        return 10;
+    return number_bases[index];
 }
 
 static void
@@ -619,19 +671,21 @@ on_number_uppercase_toggled(GtkCheckButton *button, gpointer user_data)
 static void
 update_number_flow(BinarkWindow *self)
 {
-    guint source_index = gtk_drop_down_get_selected(self->number_source_base);
-    guint target_index = gtk_drop_down_get_selected(self->number_target_base);
+    guint source_base = number_base_value(self->number_source_base);
+    guint target_base = number_base_value(self->number_target_base);
+    gchar *source_label = number_base_label(source_base);
+    gchar *target_label = number_base_label(target_base);
     gchar *text;
 
-    if (source_index > 3)
-        source_index = 2;
-    if (target_index > 3)
-        target_index = 2;
-
-    text = g_strdup_printf("Основание %u → основание %u",
-                           bases[source_index], bases[target_index]);
+    text = g_strdup_printf("%s → %s", source_label, target_label);
     gtk_label_set_text(self->number_flow, text);
     g_free(text);
+    g_free(source_label);
+    g_free(target_label);
+
+    if (self->number_uppercase != NULL)
+        gtk_widget_set_sensitive(GTK_WIDGET(self->number_uppercase),
+                                 target_base <= 36);
 }
 
 static GtkWidget *
@@ -652,7 +706,7 @@ build_number_page(BinarkWindow *self)
     GtkWidget *clear_button;
     GtkWidget *save_button;
 
-    self->number_flow = GTK_LABEL(new_label("Основание 10 → основание 2",
+    self->number_flow = GTK_LABEL(new_label("Десятичная (10) → Двоичная (2)",
                                              "binark-caption"));
     gtk_box_append(GTK_BOX(page), GTK_WIDGET(self->number_flow));
 
@@ -671,15 +725,16 @@ build_number_page(BinarkWindow *self)
     gtk_widget_set_hexpand(source_base_label, TRUE);
     gtk_widget_set_valign(source_base_label, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(source_base_row), source_base_label);
-    self->number_source_base = new_base_dropdown(2);
+    self->number_source_base = new_base_dropdown(10);
     gtk_widget_set_hexpand(GTK_WIDGET(self->number_source_base), FALSE);
     gtk_box_append(GTK_BOX(source_base_row),
                    GTK_WIDGET(self->number_source_base));
     gtk_box_append(GTK_BOX(source_panel), source_base_row);
 
     hint = new_label("Поддерживаются целые числа произвольной длины, знак "
-                     "«−» и префиксы 0b, 0o, 0x. Префикс должен "
-                     "соответствовать выбранной системе счисления.",
+                     "«−», префиксы 0b, 0o, 0x и основания 2–12, 16, 32 и "
+                     "64 (цифры 0–9, A–Z, a–z, а для основания 64 ещё + и /). "
+                     "Для основания 64 регистр букв важен.",
                      "binark-caption");
     gtk_box_append(GTK_BOX(source_panel), hint);
 
@@ -716,13 +771,13 @@ build_number_page(BinarkWindow *self)
     gtk_widget_set_hexpand(target_base_label, TRUE);
     gtk_widget_set_valign(target_base_label, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(target_base_row), target_base_label);
-    self->number_target_base = new_base_dropdown(0);
+    self->number_target_base = new_base_dropdown(2);
     gtk_box_append(GTK_BOX(target_base_row),
                    GTK_WIDGET(self->number_target_base));
     gtk_box_append(GTK_BOX(result_panel), target_base_row);
 
     self->number_uppercase = GTK_CHECK_BUTTON(
-        gtk_check_button_new_with_label("Верхний регистр HEX"));
+        gtk_check_button_new_with_label("Верхний регистр букв"));
     gtk_check_button_set_active(self->number_uppercase,
                                 g_settings_get_boolean(self->settings,
                                                        "hex-uppercase"));
@@ -1289,8 +1344,8 @@ on_text_paste_clicked(GtkButton *button, gpointer user_data)
 static void
 number_convert(BinarkWindow *self)
 {
-    guint source_index = gtk_drop_down_get_selected(self->number_source_base);
-    guint target_index = gtk_drop_down_get_selected(self->number_target_base);
+    guint source_base = number_base_value(self->number_source_base);
+    guint target_base = number_base_value(self->number_target_base);
     const gchar *source = gtk_editable_get_text(GTK_EDITABLE(self->number_source));
     gchar *result = NULL;
     GError *error = NULL;
@@ -1298,13 +1353,7 @@ number_convert(BinarkWindow *self)
 
     hide_number_error(self);
 
-    if (source_index > 3)
-        source_index = 2;
-    if (target_index > 3)
-        target_index = 2;
-
-    if (!binark_number_convert(source, bases[source_index],
-                               bases[target_index], uppercase,
+    if (!binark_number_convert(source, source_base, target_base, uppercase,
                                &result, &error)) {
         gtk_editable_set_text(GTK_EDITABLE(self->number_result), "");
         show_number_error(self, error->message);
@@ -1314,9 +1363,10 @@ number_convert(BinarkWindow *self)
 
     gtk_editable_set_text(GTK_EDITABLE(self->number_result), result);
     {
-        gchar *direction = g_strdup_printf("Основание %u → основание %u",
-                                           bases[source_index],
-                                           bases[target_index]);
+        gchar *source_label = number_base_label(source_base);
+        gchar *target_label = number_base_label(target_base);
+        gchar *direction = g_strdup_printf("%s → %s", source_label,
+                                           target_label);
         gchar *summary = g_strdup_printf("Результат: %" G_GSIZE_FORMAT
                                          " цифр.",
                                          g_utf8_strlen(result, -1));
@@ -1324,6 +1374,8 @@ number_convert(BinarkWindow *self)
         add_history(self, BINARK_HISTORY_NUMBER, direction, summary);
         g_free(summary);
         g_free(direction);
+        g_free(source_label);
+        g_free(target_label);
     }
 
     if (g_settings_get_boolean(self->settings, "copy-after-convert") &&
@@ -2253,9 +2305,9 @@ show_preferences(BinarkWindow *self, const gchar *page)
 
     switch_row = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(switch_row),
-                                   "Верхний регистр HEX");
+                                   "Верхний регистр букв");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(switch_row),
-                                "Использовать A–F в шестнадцатеричных числах");
+                                "Использовать A–Z в системах счисления больше 10");
     g_settings_bind(self->settings, "hex-uppercase", switch_row, "active",
                     G_SETTINGS_BIND_DEFAULT);
     adw_preferences_group_add(group, GTK_WIDGET(switch_row));
@@ -2343,7 +2395,7 @@ static void
 show_about(BinarkWindow *self)
 {
     static const char *developers[] = {
-        "Binark Project",
+        "SipuhSloper",
         NULL
     };
     static const char *technologies[] = {
@@ -2359,7 +2411,7 @@ show_about(BinarkWindow *self)
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(dialog),
                                            "com.binark.Binark");
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog),
-                                         "Binark Project");
+                                         "SipuhSloper");
     adw_about_dialog_set_developers(ADW_ABOUT_DIALOG(dialog), developers);
     adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), BINARK_VERSION);
     adw_about_dialog_set_comments(
@@ -2372,7 +2424,7 @@ show_about(BinarkWindow *self)
     adw_about_dialog_set_license_type(ADW_ABOUT_DIALOG(dialog),
                                       GTK_LICENSE_MIT_X11);
     adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog),
-                                    "© 2026 Binark Project");
+                                    "© 2026 SipuhSloper");
     adw_dialog_present(dialog, GTK_WIDGET(self));
 }
 

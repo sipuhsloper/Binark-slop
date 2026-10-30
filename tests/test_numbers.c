@@ -116,6 +116,119 @@ test_numbers_huge(void)
 }
 
 static void
+test_numbers_other_bases(void)
+{
+    gchar *result;
+
+    result = convert_ok("42", 10, 3, TRUE);
+    g_assert_cmpstr(result, ==, "1120");
+    g_free(result);
+
+    result = convert_ok("101", 3, 10, TRUE);
+    g_assert_cmpstr(result, ==, "10");
+    g_free(result);
+
+    result = convert_ok("255", 10, 36, TRUE);
+    g_assert_cmpstr(result, ==, "73");
+    g_free(result);
+
+    result = convert_ok("1000", 10, 36, TRUE);
+    g_assert_cmpstr(result, ==, "RS");
+    g_free(result);
+
+    result = convert_ok("1000", 10, 36, FALSE);
+    g_assert_cmpstr(result, ==, "rs");
+    g_free(result);
+
+    result = convert_ok("ZZ", 36, 10, TRUE);
+    g_assert_cmpstr(result, ==, "1295");
+    g_free(result);
+
+    result = convert_ok("hello", 36, 10, TRUE);
+    g_assert_cmpstr(result, ==, "29234652");
+    g_free(result);
+
+    result = convert_ok("1z", 36, 10, TRUE);
+    g_assert_cmpstr(result, ==, "71");
+    g_free(result);
+
+    result = convert_ok("77", 8, 36, TRUE);
+    g_assert_cmpstr(result, ==, "1R");
+    g_free(result);
+
+    result = convert_ok("0b11111111", 2, 16, TRUE);
+    g_assert_cmpstr(result, ==, "FF");
+    g_free(result);
+}
+
+static void
+test_numbers_base64(void)
+{
+    gchar *result;
+
+    result = convert_ok("10", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "64");
+    g_free(result);
+
+    result = convert_ok("+", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "62");
+    g_free(result);
+
+    result = convert_ok("/", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "63");
+    g_free(result);
+
+    result = convert_ok("Z", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "35");
+    g_free(result);
+
+    result = convert_ok("a", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "36");
+    g_free(result);
+
+    result = convert_ok("1000", 10, 64, TRUE);
+    g_assert_cmpstr(result, ==, "Fe");
+    g_free(result);
+
+    result = convert_ok("Fe", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "1000");
+    g_free(result);
+
+    result = convert_ok("123456789", 10, 64, TRUE);
+    g_assert_cmpstr(result, ==, "7MyqL");
+    g_free(result);
+
+    result = convert_ok("7MyqL", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "123456789");
+    g_free(result);
+
+    result = convert_ok("-10", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "-64");
+    g_free(result);
+
+    /* Above base 36 the letter case is significant and 0x is not a prefix. */
+    result = convert_ok("a", 37, 10, TRUE);
+    g_assert_cmpstr(result, ==, "36");
+    g_free(result);
+
+    result = convert_ok("A", 37, 10, TRUE);
+    g_assert_cmpstr(result, ==, "10");
+    g_free(result);
+
+    result = convert_ok("0x", 64, 10, TRUE);
+    g_assert_cmpstr(result, ==, "59");
+    g_free(result);
+
+    result = convert_ok("hello", 62, 10, TRUE);
+    g_assert_cmpstr(result, ==, "645099200");
+    g_free(result);
+
+    result = convert_ok("zz", 62, 10, TRUE);
+    g_assert_cmpstr(result, ==, "3843");
+    g_free(result);
+}
+
+static void
 test_numbers_errors(void)
 {
     gchar *result = NULL;
@@ -155,9 +268,19 @@ test_numbers_errors(void)
     g_assert_error(error, BINARK_NUMBER_ERROR, BINARK_NUMBER_ERROR_EMPTY);
     g_clear_error(&error);
 
-    g_assert_false(binark_number_convert("10", 3, 10, TRUE, &result, &error));
+    g_assert_false(binark_number_convert("10", 1, 10, TRUE, &result, &error));
     g_assert_error(error, BINARK_NUMBER_ERROR,
                    BINARK_NUMBER_ERROR_INVALID_BASE);
+    g_clear_error(&error);
+
+    g_assert_false(binark_number_convert("10", 65, 10, TRUE, &result, &error));
+    g_assert_error(error, BINARK_NUMBER_ERROR,
+                   BINARK_NUMBER_ERROR_INVALID_BASE);
+    g_clear_error(&error);
+
+    g_assert_false(binark_number_convert("z", 37, 10, TRUE, &result, &error));
+    g_assert_error(error, BINARK_NUMBER_ERROR,
+                   BINARK_NUMBER_ERROR_INVALID_DIGIT);
     g_clear_error(&error);
 }
 
@@ -170,6 +293,8 @@ main(int argc, char **argv)
     g_test_add_func("/numbers/zero-sign", test_numbers_zero_and_sign);
     g_test_add_func("/numbers/prefixes", test_numbers_prefixes_and_whitespace);
     g_test_add_func("/numbers/huge", test_numbers_huge);
+    g_test_add_func("/numbers/other-bases", test_numbers_other_bases);
+    g_test_add_func("/numbers/base64", test_numbers_base64);
     g_test_add_func("/numbers/errors", test_numbers_errors);
 
     return g_test_run();

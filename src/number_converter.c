@@ -4,21 +4,38 @@
 
 G_DEFINE_QUARK(binark-number-error-quark, binark_number_error)
 
+static const gchar number_digits[] =
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
+
 static gboolean
 base_is_supported(guint base)
 {
-    return base == 2 || base == 8 || base == 10 || base == 16;
+    /* 0–9, A–Z, a–z and two extra symbols give us up to 64 digits. */
+    return base >= 2 && base <= 64;
 }
 
 static gint
-digit_value(guchar c)
+digit_value(guchar c, guint base)
 {
     if (c >= '0' && c <= '9')
         return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
+
+    if (base <= 36) {
+        /* For the familiar bases letters are case-insensitive. */
+        if (c >= 'a' && c <= 'z')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'Z')
+            return c - 'A' + 10;
+        return -1;
+    }
+
+    /* Above base 36 the case matters: A=10…Z=35, a=36…z=61, +=62, /=63. */
+    {
+        const gchar *position = strchr(number_digits, c);
+
+        if (position != NULL)
+            return (gint)(position - number_digits);
+    }
     return -1;
 }
 
@@ -26,12 +43,12 @@ gboolean
 binark_number_convert(const gchar *input,
                       guint source_base,
                       guint target_base,
-                      gboolean uppercase_hex,
+                      gboolean uppercase,
                       gchar **result,
                       GError **error)
 {
-    static const gchar upper_digits[] = "0123456789ABCDEF";
-    static const gchar lower_digits[] = "0123456789abcdef";
+    static const gchar upper_digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static const gchar lower_digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
     const gchar *digits_table;
     gchar *copy;
     gchar *body;
@@ -54,8 +71,8 @@ binark_number_convert(const gchar *input,
         g_set_error(error,
                     BINARK_NUMBER_ERROR,
                     BINARK_NUMBER_ERROR_INVALID_BASE,
-                    "Поддерживаются только системы счисления с основаниями "
-                    "2, 8, 10 и 16.");
+                    "Поддерживаются системы счисления с основаниями "
+                    "от 2 до 64.");
         return FALSE;
     }
 
@@ -74,8 +91,11 @@ binark_number_convert(const gchar *input,
         return FALSE;
     }
 
-    if (*body == '+' || *body == '-') {
-        negative = (*body == '-');
+    if (*body == '-') {
+        negative = TRUE;
+        body++;
+    } else if (*body == '+' && source_base <= 63) {
+        /* In base 64 '+' is itself a digit (62), so it is not a sign there. */
         body++;
     } else if (g_str_has_prefix(body, "\xE2\x88\x92")) {
         /* Accept the typographic minus sign (U+2212) as used in the UI. */
@@ -83,15 +103,21 @@ binark_number_convert(const gchar *input,
         body += strlen("\xE2\x88\x92");
     }
 
-    if (body[0] == '0' && (body[1] == 'b' || body[1] == 'B')) {
-        prefix_base = 2;
-        body += 2;
-    } else if (body[0] == '0' && (body[1] == 'o' || body[1] == 'O')) {
-        prefix_base = 8;
-        body += 2;
-    } else if (body[0] == '0' && (body[1] == 'x' || body[1] == 'X')) {
-        prefix_base = 16;
-        body += 2;
+    /*
+     * Prefixes are only meaningful for the bases in which b/o/x are not
+     * digits. Above base 16 these letters are ordinary digits.
+     */
+    if (source_base <= 16) {
+        if (body[0] == '0' && (body[1] == 'b' || body[1] == 'B')) {
+            prefix_base = 2;
+            body += 2;
+        } else if (body[0] == '0' && (body[1] == 'o' || body[1] == 'O')) {
+            prefix_base = 8;
+            body += 2;
+        } else if (body[0] == '0' && (body[1] == 'x' || body[1] == 'X')) {
+            prefix_base = 16;
+            body += 2;
+        }
     }
 
     if (prefix_base != 0 && prefix_base != source_base) {
@@ -119,7 +145,7 @@ binark_number_convert(const gchar *input,
 
     magnitude = g_new(guint8, body_len);
     for (i = 0; i < body_len; i++) {
-        gint value = digit_value((guchar)body[i]);
+        gint value = digit_value((guchar)body[i], source_base);
 
         if (value < 0 || (guint)value >= source_base) {
             g_set_error(error,
@@ -173,9 +199,10 @@ binark_number_convert(const gchar *input,
     g_free(magnitude);
     g_free(copy);
 
-    digits_table = (target_base == 16 && !uppercase_hex)
-                       ? lower_digits
-                       : upper_digits;
+    if (target_base <= 36)
+        digits_table = uppercase ? upper_digits : lower_digits;
+    else
+        digits_table = number_digits;
     digit_count = output_digits->len;
     out = g_string_sized_new(digit_count + (negative ? 2 : 1));
     if (negative)

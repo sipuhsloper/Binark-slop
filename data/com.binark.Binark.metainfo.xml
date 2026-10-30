@@ -14,14 +14,14 @@
     <p>Features:</p>
     <ul>
       <li>UTF-8 text to and from byte-wise binary notation</li>
-      <li>Arbitrary-precision conversion between binary, octal, decimal and hexadecimal</li>
+      <li>Arbitrary-precision conversion between bases 2–12, 16, 32 and 64</li>
       <li>Streaming file encoding and decoding with progress and cancellation</li>
       <li>Configurable formatting, optional local history and light/dark themes</li>
     </ul>
   </description>
   <launchable type="desktop-id">com.binark.Binark.desktop</launchable>
   <developer id="com.binark">
-    <name>Binark Project</name>
+    <name>SipuhSloper</name>
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
