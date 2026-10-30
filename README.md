@@ -48,7 +48,7 @@
 ## Сборка
 
 ```bash
-git clone https://github.com/bobobop635rtu/Binark-slop.git
+git clone https://github.com/sipuhsloper/Binark-slop.git
 cd Binark
 make
 ```
