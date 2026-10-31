@@ -29,13 +29,22 @@ typedef gboolean (*BinarkFileProgressFunc)(guint64 done,
                                             guint64 total,
                                             gpointer user_data);
 
-/* Estimated size of the text representation of input_size bytes. */
+/* Estimated size of the binary text representation of input_size bytes. */
 guint64 binark_file_encoded_size(guint64 input_size,
                                  gboolean compact,
                                  guint bytes_per_line);
 
+/* Estimated size of the text representation in the given base. */
+guint64 binark_file_encoded_size_base(guint64 input_size,
+                                      guint base,
+                                      gboolean compact,
+                                      guint bytes_per_line);
+
 /* Conservative upper bound of the decoded binary size. */
 guint64 binark_file_decoded_size(guint64 input_size);
+
+/* Conservative upper bound of the decoded size for the given base. */
+guint64 binark_file_decoded_size_base(guint64 input_size, guint base);
 
 /*
  * Verify that the filesystem containing output_path has at least needed
@@ -59,6 +68,33 @@ gboolean binark_file_encode(const gchar *input_path,
                             BinarkFileProgressFunc progress,
                             gpointer user_data,
                             GError **error);
+
+/*
+ * Encode a file into a textual representation in the given base. Every input
+ * byte becomes binark_text_base_width(base) digits; base 2 produces the usual
+ * binary form. The output is written to a temporary file in the destination
+ * directory and atomically renamed only after a successful complete write.
+ * An existing output file is preserved on failure.
+ */
+gboolean binark_file_encode_base(const gchar *input_path,
+                                 const gchar *output_path,
+                                 guint base,
+                                 gboolean compact,
+                                 guint bytes_per_line,
+                                 BinarkFileProgressFunc progress,
+                                 gpointer user_data,
+                                 GError **error);
+
+/*
+ * Decode a textual representation in the given base back to a binary file
+ * using the same atomic replacement strategy.
+ */
+gboolean binark_file_decode_base(const gchar *input_path,
+                                 const gchar *output_path,
+                                 guint base,
+                                 BinarkFileProgressFunc progress,
+                                 gpointer user_data,
+                                 GError **error);
 
 /*
  * Decode a textual bit representation to a binary file using the same atomic

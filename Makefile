@@ -13,7 +13,7 @@ BUILD_DIR := build
 TEST_DIR := $(BUILD_DIR)/tests
 
 APP_ID := com.binark.Binark
-VERSION := 1.0.0
+VERSION := 1.1.0
 
 WARNINGS := -Wall -Wextra -Wpedantic -Wformat=2 -Wshadow \
             -Wstrict-prototypes -Wmissing-prototypes -Wno-unused-parameter
@@ -43,7 +43,7 @@ ICON := data/icons/hicolor/scalable/apps/$(APP_ID).svg
 
 TEST_TEXT_OBJECTS := $(TEST_DIR)/test_text.o $(BUILD_DIR)/text_converter.o $(BUILD_DIR)/converter.o
 TEST_NUMBER_OBJECTS := $(TEST_DIR)/test_numbers.o $(BUILD_DIR)/number_converter.o
-TEST_FILE_OBJECTS := $(TEST_DIR)/test_files.o $(BUILD_DIR)/file_converter.o $(BUILD_DIR)/converter.o
+TEST_FILE_OBJECTS := $(TEST_DIR)/test_files.o $(BUILD_DIR)/file_converter.o $(BUILD_DIR)/text_converter.o $(BUILD_DIR)/converter.o
 
 TEST_BINARIES := $(TEST_DIR)/test_text $(TEST_DIR)/test_numbers $(TEST_DIR)/test_files
 

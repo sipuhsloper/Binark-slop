@@ -352,6 +352,107 @@ test_files_large_roundtrip(void)
     g_free(dir);
 }
 
+static void
+test_files_base_roundtrip(void)
+{
+    GError *error = NULL;
+    gchar *dir = g_dir_make_tmp("binark-test-XXXXXX", &error);
+    gchar *input = NULL;
+    gchar *encoded = NULL;
+    gchar *decoded = NULL;
+    guint8 source[] = {0x00, 0x01, 0xff, 'A', 0x80};
+    guint8 *result;
+    gsize result_len;
+    gchar *text = NULL;
+    gsize text_len = 0;
+
+    g_assert_no_error(error);
+    g_assert_nonnull(dir);
+
+    input = path_join(dir, "input.bin");
+    encoded = path_join(dir, "output.base10");
+    decoded = path_join(dir, "restored.bin");
+
+    write_bytes(input, source, sizeof(source));
+
+    g_assert_true(binark_file_encode_base(input, encoded, 10, FALSE, 8, NULL,
+                                          NULL, &error));
+    g_assert_no_error(error);
+    g_assert_true(g_file_get_contents(encoded, &text, &text_len, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(text, ==, "000 001 255 065 128");
+    g_free(text);
+
+    g_assert_true(binark_file_decode_base(encoded, decoded, 10, NULL, NULL,
+                                          &error));
+    g_assert_no_error(error);
+    result = read_bytes(decoded, &result_len);
+    g_assert_cmpuint(result_len, ==, sizeof(source));
+    g_assert_cmpmem(result, result_len, source, sizeof(source));
+    g_free(result);
+
+    /* Compact base 64 representation of the same bytes. */
+    g_assert_true(binark_file_encode_base(input, encoded, 64, TRUE, 1, NULL,
+                                          NULL, &error));
+    g_assert_no_error(error);
+    g_assert_true(g_file_get_contents(encoded, &text, &text_len, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(text, ==, "00013/1120");
+    g_free(text);
+
+    g_assert_true(binark_file_decode_base(encoded, decoded, 64, NULL, NULL,
+                                          &error));
+    g_assert_no_error(error);
+    result = read_bytes(decoded, &result_len);
+    g_assert_cmpuint(result_len, ==, sizeof(source));
+    g_assert_cmpmem(result, result_len, source, sizeof(source));
+    g_free(result);
+
+    g_remove(input);
+    g_remove(encoded);
+    g_remove(decoded);
+    g_rmdir(dir);
+    g_free(input);
+    g_free(encoded);
+    g_free(decoded);
+    g_free(dir);
+}
+
+static void
+test_files_base_errors(void)
+{
+    GError *error = NULL;
+    gchar *dir = g_dir_make_tmp("binark-test-XXXXXX", &error);
+    gchar *input = NULL;
+    gchar *output = NULL;
+
+    g_assert_no_error(error);
+    g_assert_nonnull(dir);
+
+    input = path_join(dir, "bad.base10");
+    output = path_join(dir, "result.bin");
+
+    write_bytes(input, (const guint8 *)"000 999", 7);
+    g_assert_false(binark_file_decode_base(input, output, 10, NULL, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_FILE_ERROR,
+                   BINARK_FILE_ERROR_INVALID_FORMAT);
+    g_clear_error(&error);
+
+    write_bytes(input, (const guint8 *)"000 00A", 7);
+    g_assert_false(binark_file_decode_base(input, output, 10, NULL, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_FILE_ERROR,
+                   BINARK_FILE_ERROR_INVALID_FORMAT);
+    g_clear_error(&error);
+
+    g_remove(input);
+    g_rmdir(dir);
+    g_free(input);
+    g_free(output);
+    g_free(dir);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -364,6 +465,8 @@ main(int argc, char **argv)
     g_test_add_func("/files/cancel", test_files_cancel);
     g_test_add_func("/files/errors", test_files_errors);
     g_test_add_func("/files/large-roundtrip", test_files_large_roundtrip);
+    g_test_add_func("/files/base-roundtrip", test_files_base_roundtrip);
+    g_test_add_func("/files/base-errors", test_files_base_errors);
 
     return g_test_run();
 }

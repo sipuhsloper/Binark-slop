@@ -1,5 +1,6 @@
 #include "file_converter.h"
 #include "converter.h"
+#include "text_converter.h"
 
 #include <errno.h>
 #include <glib/gstdio.h>
@@ -265,19 +266,53 @@ binark_file_encoded_size(guint64 input_size,
                          gboolean compact,
                          guint bytes_per_line)
 {
-    guint64 per_byte = compact ? 8 : 9;
+    return binark_file_encoded_size_base(input_size, 2, compact,
+                                         bytes_per_line);
+}
 
-    (void)bytes_per_line;
+guint64
+binark_file_encoded_size_base(guint64 input_size,
+                              guint base,
+                              gboolean compact,
+                              guint bytes_per_line)
+{
+    guint width = binark_text_base_width(base);
+    guint64 per_byte;
+    guint64 result;
 
+    if (width == 0)
+        width = 8;
+
+    per_byte = width + (compact ? 0 : 1);
     if (input_size > G_MAXUINT64 / per_byte)
         return G_MAXUINT64;
-    return input_size * per_byte;
+    result = input_size * per_byte;
+
+    if (!compact && bytes_per_line > 0) {
+        guint64 lines = input_size / bytes_per_line;
+
+        if (result > G_MAXUINT64 - lines)
+            return G_MAXUINT64;
+        result += lines;
+    }
+
+    return result;
 }
 
 guint64
 binark_file_decoded_size(guint64 input_size)
 {
-    return input_size / 8 + (input_size % 8 != 0 ? 1 : 0);
+    return binark_file_decoded_size_base(input_size, 2);
+}
+
+guint64
+binark_file_decoded_size_base(guint64 input_size, guint base)
+{
+    guint width = binark_text_base_width(base);
+
+    if (width == 0)
+        width = 8;
+    return input_size / width + (input_size % width != 0 ? 1 : 0);
 }
 
 static gboolean
@@ -309,12 +344,21 @@ binark_file_encode(const gchar *input_path,
                    gpointer user_data,
                    GError **error)
 {
-    static const gchar bit_table[16][5] = {
-        "0000", "0001", "0010", "0011",
-        "0100", "0101", "0110", "0111",
-        "1000", "1001", "1010", "1011",
-        "1100", "1101", "1110", "1111"
-    };
+    return binark_file_encode_base(input_path, output_path, 2, compact,
+                                   bytes_per_line, progress, user_data, error);
+}
+
+gboolean
+binark_file_encode_base(const gchar *input_path,
+                        const gchar *output_path,
+                        guint base,
+                        gboolean compact,
+                        guint bytes_per_line,
+                        BinarkFileProgressFunc progress,
+                        gpointer user_data,
+                        GError **error)
+{
+    guint width = binark_text_base_width(base);
     FILE *input = NULL;
     AtomicOutput output;
     struct stat info;
@@ -329,6 +373,15 @@ binark_file_encode(const gchar *input_path,
 
     memset(&output, 0, sizeof(output));
     output.fd = -1;
+
+    if (width == 0) {
+        g_set_error(error,
+                    BINARK_FILE_ERROR,
+                    BINARK_FILE_ERROR_INVALID_FORMAT,
+                    "Поддерживаются системы счисления с основаниями "
+                    "от 2 до 64.");
+        return FALSE;
+    }
 
     if (input_path == NULL || output_path == NULL || *input_path == '\0' ||
         *output_path == '\0') {
@@ -362,9 +415,9 @@ binark_file_encode(const gchar *input_path,
         input_size = (guint64)info.st_size;
 
     if (!binark_file_check_space(output_path,
-                                 binark_file_encoded_size(input_size,
-                                                          compact,
-                                                          bytes_per_line) +
+                                 binark_file_encoded_size_base(input_size,
+                                                               base, compact,
+                                                               bytes_per_line) +
                                      1024,
                                  error))
         goto out;
@@ -380,8 +433,9 @@ binark_file_encode(const gchar *input_path,
 
         for (i = 0; i < bytes_read; i++) {
             guint8 byte = in_buffer[i];
+            gchar digits[8];
 
-            if (out_pos + 16 > sizeof(out_buffer)) {
+            if (out_pos + 10 > sizeof(out_buffer)) {
                 if (!flush_bytes(output.fp, out_buffer, out_pos, error))
                     goto out;
                 out_pos = 0;
@@ -392,10 +446,9 @@ binark_file_encode(const gchar *input_path,
                     out_buffer[out_pos++] = ' ';
             }
 
-            memcpy(out_buffer + out_pos, bit_table[byte >> 4], 4);
-            out_pos += 4;
-            memcpy(out_buffer + out_pos, bit_table[byte & 0x0f], 4);
-            out_pos += 4;
+            binark_text_format_byte(byte, base, digits);
+            memcpy(out_buffer + out_pos, digits, width);
+            out_pos += width;
 
             column++;
             if (!compact && bytes_per_line > 0 &&
@@ -461,6 +514,19 @@ binark_file_decode(const gchar *input_path,
                    gpointer user_data,
                    GError **error)
 {
+    return binark_file_decode_base(input_path, output_path, 2, progress,
+                                   user_data, error);
+}
+
+gboolean
+binark_file_decode_base(const gchar *input_path,
+                        const gchar *output_path,
+                        guint base,
+                        BinarkFileProgressFunc progress,
+                        gpointer user_data,
+                        GError **error)
+{
+    guint width = binark_text_base_width(base);
     FILE *input = NULL;
     AtomicOutput output;
     struct stat info;
@@ -470,7 +536,7 @@ binark_file_decode(const gchar *input_path,
     guchar out_buffer[BINARK_OUTPUT_BUFFER_SIZE];
     gsize out_pos = 0;
     guint current = 0;
-    guint bit_count = 0;
+    guint digit_count = 0;
     gsize line = 1;
     gsize column = 1;
     gsize bytes_read;
@@ -478,6 +544,15 @@ binark_file_decode(const gchar *input_path,
 
     memset(&output, 0, sizeof(output));
     output.fd = -1;
+
+    if (width == 0) {
+        g_set_error(error,
+                    BINARK_FILE_ERROR,
+                    BINARK_FILE_ERROR_INVALID_FORMAT,
+                    "Поддерживаются системы счисления с основаниями "
+                    "от 2 до 64.");
+        return FALSE;
+    }
 
     if (input_path == NULL || output_path == NULL || *input_path == '\0' ||
         *output_path == '\0') {
@@ -511,7 +586,8 @@ binark_file_decode(const gchar *input_path,
         input_size = (guint64)info.st_size;
 
     if (!binark_file_check_space(output_path,
-                                 binark_file_decoded_size(input_size) + 1024,
+                                 binark_file_decoded_size_base(input_size,
+                                                               base) + 1024,
                                  error))
         goto out;
 
@@ -537,34 +613,53 @@ binark_file_decode(const gchar *input_path,
                 continue;
             }
 
-            if (c != '0' && c != '1') {
-                gchar printable[64];
+            {
+                gint digit = binark_text_digit_value(c, base);
 
-                if (c >= 0x20 && c <= 0x7e)
-                    g_snprintf(printable, sizeof(printable), "«%c»", c);
-                else
-                    g_snprintf(printable, sizeof(printable),
-                               "байт 0x%02X", c);
+                if (digit < 0) {
+                    gchar printable[64];
 
-                g_set_error(error,
-                            BINARK_FILE_ERROR,
-                            BINARK_FILE_ERROR_INVALID_FORMAT,
-                            "Недопустимый символ %s в строке %" G_GSIZE_FORMAT
-                            ", столбце %" G_GSIZE_FORMAT
-                            ". Ожидаются только 0, 1 и пробельные символы.",
-                            printable, line, column);
-                goto out;
+                    if (c >= 0x20 && c <= 0x7e)
+                        g_snprintf(printable, sizeof(printable), "«%c»", c);
+                    else
+                        g_snprintf(printable, sizeof(printable),
+                                   "байт 0x%02X", c);
+
+                    g_set_error(error,
+                                BINARK_FILE_ERROR,
+                                BINARK_FILE_ERROR_INVALID_FORMAT,
+                                "Недопустимый символ %s в строке "
+                                "%" G_GSIZE_FORMAT ", столбце "
+                                "%" G_GSIZE_FORMAT ". Ожидаются цифры "
+                                "системы счисления с основанием %u "
+                                "и пробельные символы.",
+                                printable, line, column, base);
+                    goto out;
+                }
+
+                current = current * base + (guint)digit;
             }
-
-            current = (current << 1) | (guint)(c - '0');
-            bit_count++;
+            digit_count++;
             column++;
 
-            if (bit_count == 8) {
-                guint8 byte = (guint8)current;
-                out_buffer[out_pos++] = byte;
+            if (digit_count == width) {
+                if (current > 255) {
+                    g_set_error(error,
+                                BINARK_FILE_ERROR,
+                                BINARK_FILE_ERROR_INVALID_FORMAT,
+                                "Значение %u в строке %" G_GSIZE_FORMAT
+                                " больше 255 и не является байтом. "
+                                "Итоговый файл не создан.",
+                                current, line);
+                    goto out;
+                }
+
+                {
+                    guint8 byte = (guint8)current;
+                    out_buffer[out_pos++] = byte;
+                }
                 current = 0;
-                bit_count = 0;
+                digit_count = 0;
 
                 if (out_pos == sizeof(out_buffer)) {
                     if (!flush_bytes(output.fp, out_buffer, out_pos, error))
@@ -599,13 +694,13 @@ binark_file_decode(const gchar *input_path,
         goto out;
     }
 
-    if (bit_count != 0) {
+    if (digit_count != 0) {
         g_set_error(error,
                     BINARK_FILE_ERROR,
                     BINARK_FILE_ERROR_INVALID_FORMAT,
-                    "Неполный байт: в файле осталось %u бит(а) вместо 8. "
+                    "Неполная группа: в файле осталось цифр: %u, а нужно %u. "
                     "Итоговый файл не создан.",
-                    bit_count);
+                    digit_count, width);
         goto out;
     }
 

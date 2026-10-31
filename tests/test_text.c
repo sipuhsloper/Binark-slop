@@ -31,6 +31,18 @@ test_text_empty(void)
     g_assert_no_error(error);
     g_assert_cmpstr(decoded, ==, "");
     g_free(decoded);
+
+    encoded = binark_text_encode_base("", 0, 10, TRUE, 8, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "");
+    g_assert_cmpuint(encoded_len, ==, 0);
+    g_free(encoded);
+
+    g_assert_true(binark_text_decode_base(" \n", 2, 10, &decoded, &decoded_len,
+                                          &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(decoded, ==, "");
+    g_assert_cmpuint(decoded_len, ==, 0);
+    g_free(decoded);
 }
 
 static void
@@ -179,7 +191,7 @@ test_text_invalid(void)
 }
 
 static void
-test_text_base64(void)
+test_text_base_widths_and_ascii(void)
 {
     gchar *encoded;
     gchar *decoded = NULL;
@@ -187,58 +199,139 @@ test_text_base64(void)
     gsize decoded_len = 0;
     GError *error = NULL;
 
-    encoded = binark_text_encode_base64("Hi", 2, &encoded_len);
-    g_assert_cmpstr(encoded, ==, "SGk=");
-    g_assert_cmpuint(encoded_len, ==, 4);
+    g_assert_cmpuint(binark_text_base_width(2), ==, 8);
+    g_assert_cmpuint(binark_text_base_width(3), ==, 6);
+    g_assert_cmpuint(binark_text_base_width(8), ==, 3);
+    g_assert_cmpuint(binark_text_base_width(10), ==, 3);
+    g_assert_cmpuint(binark_text_base_width(16), ==, 2);
+    g_assert_cmpuint(binark_text_base_width(32), ==, 2);
+    g_assert_cmpuint(binark_text_base_width(64), ==, 2);
+    g_assert_cmpuint(binark_text_base_width(1), ==, 0);
+    g_assert_cmpuint(binark_text_base_width(65), ==, 0);
+
+    encoded = binark_text_encode_base("Hi", 2, 10, TRUE, 8, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "072 105");
+    g_assert_cmpuint(encoded_len, ==, 7);
     g_free(encoded);
 
-    encoded = binark_text_encode_base64("", 0, &encoded_len);
+    encoded = binark_text_encode_base("Hi", 2, 16, TRUE, 8, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "48 69");
+    g_free(encoded);
+
+    encoded = binark_text_encode_base("Hi", 2, 64, TRUE, 8, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "18 1f");
+    g_free(encoded);
+
+    encoded = binark_text_encode_base("Hi", 2, 32, TRUE, 8, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "28 39");
+    g_free(encoded);
+
+    encoded = binark_text_encode_base("Hi", 2, 10, FALSE, 1, &encoded_len);
+    g_assert_cmpstr(encoded, ==, "072105");
+    g_assert_cmpuint(encoded_len, ==, 6);
+    g_free(encoded);
+
+    encoded = binark_text_encode_base("", 0, 10, TRUE, 8, &encoded_len);
     g_assert_cmpstr(encoded, ==, "");
     g_assert_cmpuint(encoded_len, ==, 0);
     g_free(encoded);
 
-    g_assert_true(binark_text_decode_base64("SGk=", 4, &decoded, &decoded_len,
-                                            &error));
+    g_assert_true(binark_text_decode_base("072 105", 7, 10, &decoded,
+                                         &decoded_len, &error));
     g_assert_no_error(error);
     g_assert_cmpstr(decoded, ==, "Hi");
     g_assert_cmpuint(decoded_len, ==, 2);
     g_free(decoded);
 
-    g_assert_false(binark_text_decode_base64("SGk", 3, &decoded, &decoded_len,
-                                             &error));
-    g_assert_error(error, BINARK_TEXT_ERROR, BINARK_TEXT_ERROR_INVALID_CHARACTER);
-    g_clear_error(&error);
+    g_assert_true(binark_text_decode_base("48\n69", 5, 16, &decoded,
+                                         &decoded_len, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(decoded, ==, "Hi");
+    g_free(decoded);
+
+    g_assert_true(binark_text_decode_base("181f", 4, 64, &decoded,
+                                         &decoded_len, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(decoded, ==, "Hi");
+    g_free(decoded);
 }
 
 static void
-test_text_base32(void)
+test_text_base_unicode_roundtrip(void)
 {
-    gchar *encoded;
+    const gchar *samples[] = {
+        "Привет, мир!",
+        "Ёжик",
+        "😀🚀✨",
+        "日本語"
+    };
+    const guint bases[] = { 2, 3, 5, 8, 10, 11, 12, 16, 32, 64 };
+    guint i;
+    guint j;
+
+    for (i = 0; i < G_N_ELEMENTS(samples); i++) {
+        for (j = 0; j < G_N_ELEMENTS(bases); j++) {
+            gchar *encoded;
+            gchar *decoded = NULL;
+            gsize encoded_len = 0;
+            gsize decoded_len = 0;
+            GError *error = NULL;
+
+            encoded = binark_text_encode_base(samples[i], strlen(samples[i]),
+                                              bases[j], TRUE, 4,
+                                              &encoded_len);
+            g_assert_nonnull(encoded);
+            g_assert_cmpuint(encoded_len, >, 0);
+
+            g_assert_true(binark_text_decode_base(encoded, encoded_len,
+                                                  bases[j], &decoded,
+                                                  &decoded_len, &error));
+            g_assert_no_error(error);
+            g_assert_cmpstr(decoded, ==, samples[i]);
+            g_assert_cmpuint(decoded_len, ==, strlen(samples[i]));
+
+            g_free(decoded);
+            g_free(encoded);
+        }
+    }
+}
+
+static void
+test_text_base_errors(void)
+{
     gchar *decoded = NULL;
-    gsize encoded_len = 0;
-    gsize decoded_len = 0;
     GError *error = NULL;
 
-    encoded = binark_text_encode_base32("Hi", 2, &encoded_len);
-    g_assert_cmpstr(encoded, ==, "JBUQ====");
-    g_assert_cmpuint(encoded_len, ==, 8);
-    g_free(encoded);
+    /* 999 does not fit into a byte. */
+    g_assert_false(binark_text_decode_base("999", 3, 10, &decoded, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_TEXT_ERROR,
+                   BINARK_TEXT_ERROR_INVALID_CHARACTER);
+    g_clear_error(&error);
 
-    encoded = binark_text_encode_base32("", 0, &encoded_len);
-    g_assert_cmpstr(encoded, ==, "");
-    g_assert_cmpuint(encoded_len, ==, 0);
-    g_free(encoded);
+    /* Incomplete group of digits. */
+    g_assert_false(binark_text_decode_base("07", 2, 10, &decoded, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_TEXT_ERROR,
+                   BINARK_TEXT_ERROR_INCOMPLETE_BYTE);
+    g_clear_error(&error);
 
-    g_assert_true(binark_text_decode_base32("JBUQ====", 8, &decoded, &decoded_len,
-                                            &error));
-    g_assert_no_error(error);
-    g_assert_cmpstr(decoded, ==, "Hi");
-    g_assert_cmpuint(decoded_len, ==, 2);
-    g_free(decoded);
+    /* A is not a digit in base 10. */
+    g_assert_false(binark_text_decode_base("0A0", 3, 10, &decoded, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_TEXT_ERROR,
+                   BINARK_TEXT_ERROR_INVALID_CHARACTER);
+    g_clear_error(&error);
 
-    g_assert_false(binark_text_decode_base32("JBUQ", 4, &decoded, &decoded_len,
-                                             &error));
-    g_assert_error(error, BINARK_TEXT_ERROR, BINARK_TEXT_ERROR_INVALID_CHARACTER);
+    /* Embedded NUL and invalid UTF-8 are rejected for text. */
+    g_assert_false(binark_text_decode_base("00", 2, 16, &decoded, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_TEXT_ERROR, BINARK_TEXT_ERROR_NUL_BYTE);
+    g_clear_error(&error);
+
+    g_assert_false(binark_text_decode_base("FF", 2, 16, &decoded, NULL,
+                                           &error));
+    g_assert_error(error, BINARK_TEXT_ERROR, BINARK_TEXT_ERROR_INVALID_UTF8);
     g_clear_error(&error);
 }
 
@@ -255,8 +348,9 @@ main(int argc, char **argv)
     g_test_add_func("/text/decode-whitespace", test_text_decode_whitespace);
     g_test_add_func("/text/incomplete", test_text_incomplete);
     g_test_add_func("/text/invalid", test_text_invalid);
-    g_test_add_func("/text/base64", test_text_base64);
-    g_test_add_func("/text/base32", test_text_base32);
+    g_test_add_func("/text/base-widths", test_text_base_widths_and_ascii);
+    g_test_add_func("/text/base-unicode", test_text_base_unicode_roundtrip);
+    g_test_add_func("/text/base-errors", test_text_base_errors);
 
     return g_test_run();
 }

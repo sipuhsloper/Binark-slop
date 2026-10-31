@@ -1,10 +1,18 @@
 #include "text_converter.h"
 
-#include <stdint.h>
-
 #include <string.h>
 
 G_DEFINE_QUARK(binark-text-error-quark, binark_text_error)
+
+static const gchar text_digits[] =
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
+
+static gboolean
+is_text_separator(guchar c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+           c == '\v' || c == '\f';
+}
 
 gchar *
 binark_text_encode(const gchar *text,
@@ -55,13 +63,6 @@ binark_text_encode(const gchar *text,
     return g_string_free(result, FALSE);
 }
 
-static gboolean
-is_binary_separator(guchar c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
-           c == '\v' || c == '\f';
-}
-
 gboolean
 binark_text_decode(const gchar *bits,
                    gsize bits_len,
@@ -92,7 +93,7 @@ binark_text_decode(const gchar *bits,
     for (i = 0; i < bits_len; i++) {
         guchar c = (guchar)bits[i];
 
-        if (is_binary_separator(c)) {
+        if (is_text_separator(c)) {
             if (c == '\n') {
                 line++;
                 column = 1;
@@ -136,7 +137,8 @@ binark_text_decode(const gchar *bits,
         return FALSE;
     }
 
-    if (memchr(bytes->data, '\0', bytes->len) != NULL) {
+    if (bytes->len > 0 &&
+        memchr(bytes->data, '\0', bytes->len) != NULL) {
         g_set_error(error,
                     BINARK_TEXT_ERROR,
                     BINARK_TEXT_ERROR_NUL_BYTE,
@@ -170,91 +172,101 @@ binark_text_decode(const gchar *bits,
     return TRUE;
 }
 
-typedef struct {
-    const gchar *alphabet;
-    int digit_bits;
-    int group_bytes;
-    int base_kind;
-} TextCodec;
-
-static const TextCodec text_codecs[] = {
-    { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
-      6, 3, 0 },
-    { "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", 5, 5, 1 }
-};
-
-static int
-text_char_value(guchar c, const TextCodec *codec)
+guint
+binark_text_base_width(guint base)
 {
-    int value = -1;
+    guint width = 1;
+    guint64 capacity;
 
-    if (codec->base_kind == 0) {
-        if (c >= 'A' && c <= 'Z')
-            value = c - 'A';
-        else if (c >= 'a' && c <= 'z')
-            value = 26 + (c - 'a');
-        else if (c >= '0' && c <= '9')
-            value = 52 + (c - '0');
-        else if (c == '+')
-            value = 62;
-        else if (c == '/')
-            value = 63;
+    if (base < 2 || base > 64)
+        return 0;
+
+    capacity = base;
+    while (capacity < 256) {
+        capacity *= base;
+        width++;
+    }
+    return width;
+}
+
+gint
+binark_text_digit_value(guchar c, guint base)
+{
+    gint value = -1;
+
+    if (base < 2 || base > 64)
+        return -1;
+
+    if (c >= '0' && c <= '9') {
+        value = c - '0';
+    } else if (base <= 36) {
+        if (c >= 'a' && c <= 'z')
+            value = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'Z')
+            value = c - 'A' + 10;
     } else {
-        if (c >= 'A' && c <= 'Z')
-            value = c - 'A';
-        else if (c >= '2' && c <= '7')
-            value = 26 + (c - '2');
+        const gchar *position = strchr(text_digits, c);
+
+        if (position != NULL)
+            value = (gint)(position - text_digits);
     }
 
-    if (value < 0 || value > ((1 << codec->digit_bits) - 1))
+    if (value < 0 || (guint)value >= base)
         return -1;
     return value;
 }
 
-static gchar *
-text_encoded_from_bytes(const guchar *bytes,
-                        gsize n,
-                        const TextCodec *codec,
-                        gsize *out_len)
+guint
+binark_text_format_byte(guint8 byte, guint base, gchar buffer[8])
 {
-    GString *out;
-    gsize i = 0;
-    int capacity = (int)(codec->group_bytes * 8 / codec->digit_bits);
+    guint width = binark_text_base_width(base);
+    guint value = byte;
+    guint i;
 
-    if (n == 0) {
+    if (width == 0 || buffer == NULL)
+        return 0;
+
+    for (i = width; i > 0; i--) {
+        buffer[i - 1] = text_digits[value % base];
+        value /= base;
+    }
+    return width;
+}
+
+static gchar *
+text_encode_base_bytes_impl(const guchar *data,
+                            gsize len,
+                            guint base,
+                            gboolean separated,
+                            guint bytes_per_line,
+                            gsize *out_len)
+{
+    guint width = binark_text_base_width(base);
+    GString *out;
+    gsize i;
+    guint column = 0;
+    gchar digits[8];
+
+    if (width == 0 || data == NULL || len == 0) {
         if (out_len != NULL)
             *out_len = 0;
         return g_strdup("");
     }
 
-    out = g_string_sized_new(n + n / 3 * 4 + 4);
-    while (i < n) {
-        gsize glen = 0;
-        uint64_t group = 0;
-        int data_chars;
-        int total_chars = capacity;
-        uint64_t shifted;
-        int j;
+    out = g_string_sized_new(len * (width + (separated ? 1 : 0)) + 2);
 
-        while (glen < (size_t)codec->group_bytes && i < n) {
-            group = (group << 8) | bytes[i];
-            i++;
-            glen++;
-        }
+    for (i = 0; i < len; i++) {
+        if (separated && column != 0)
+            g_string_append_c(out, ' ');
 
-        data_chars = (int)((glen * 8 + codec->digit_bits - 1) /
-                           codec->digit_bits);
-        shifted = group << (capacity * codec->digit_bits - (glen * 8));
+        binark_text_format_byte(data[i], base, digits);
+        g_string_append_len(out, digits, width);
+        column++;
 
-        for (j = 0; j < total_chars; j++) {
-            int shift = (total_chars - 1 - j) * codec->digit_bits;
-            int mask = (1 << codec->digit_bits) - 1;
-            int value = (int)((shifted >> shift) & mask);
-
-            if (j < data_chars)
-                g_string_append_c(out, codec->alphabet[value]);
-            else
-                g_string_append_c(out, '=');
+        if (separated && bytes_per_line > 0 && column >= bytes_per_line) {
+            if (i + 1 < len)
+                g_string_append_c(out, '\n');
+            column = 0;
         }
     }
 
@@ -264,147 +276,156 @@ text_encoded_from_bytes(const guchar *bytes,
 }
 
 static gboolean
-text_decoded_from_base(const gchar *input,
-                       gsize input_len,
-                       const TextCodec *codec,
-                       GByteArray **bytes_out,
-                       GError **error)
+text_decode_base_bytes_impl(const gchar *input,
+                            gsize input_len,
+                            guint base,
+                            GByteArray **bytes_out,
+                            GError **error)
 {
-    GString *clean = NULL;
-    GByteArray *bytes = NULL;
-    gsize len = 0;
-    gsize groups;
-    gsize g;
+    guint width = binark_text_base_width(base);
+    GByteArray *bytes;
+    guint value = 0;
+    guint count = 0;
+    gsize i;
+    gsize line = 1;
+    gsize column = 1;
 
-    clean = g_string_new("");
-    for (gsize i = 0; i < input_len; i++) {
+    if (bytes_out == NULL) {
+        g_set_error(error,
+                    BINARK_TEXT_ERROR,
+                    BINARK_TEXT_ERROR_INVALID_CHARACTER,
+                    "Не задан буфер результата.");
+        return FALSE;
+    }
+    *bytes_out = NULL;
+
+    if (width == 0) {
+        g_set_error(error,
+                    BINARK_TEXT_ERROR,
+                    BINARK_TEXT_ERROR_INVALID_CHARACTER,
+                    "Поддерживаются системы счисления с основаниями "
+                    "от 2 до 64.");
+        return FALSE;
+    }
+
+    if (input == NULL)
+        input_len = 0;
+
+    bytes = g_byte_array_sized_new(input_len / width + 1);
+
+    for (i = 0; i < input_len; i++) {
         guchar c = (guchar)input[i];
+        gint digit;
 
-        if (is_binary_separator(c))
+        if (is_text_separator(c)) {
+            if (c == '\n') {
+                line++;
+                column = 1;
+            } else {
+                column++;
+            }
             continue;
-        g_string_append_c(clean, (char)c);
-    }
-    len = clean->len;
+        }
 
-    if (len == 0) {
-        *bytes_out = g_byte_array_sized_new(0);
-        g_string_free(clean, TRUE);
-        return TRUE;
-    }
+        digit = binark_text_digit_value(c, base);
+        if (digit < 0) {
+            gchar printable[64];
 
-    {
-        int capacity = (int)(codec->group_bytes * 8 / codec->digit_bits);
+            if (c >= 0x20 && c <= 0x7e)
+                g_snprintf(printable, sizeof(printable), "«%c»", c);
+            else
+                g_snprintf(printable, sizeof(printable), "байт 0x%02X", c);
 
-        if (len % capacity != 0) {
             g_set_error(error,
                         BINARK_TEXT_ERROR,
                         BINARK_TEXT_ERROR_INVALID_CHARACTER,
-                        "Некорректная длина зашифрованной строки.");
-            g_string_free(clean, TRUE);
+                        "Недопустимый символ %s в строке %" G_GSIZE_FORMAT
+                        ", столбце %" G_GSIZE_FORMAT
+                        " для системы счисления с основанием %u.",
+                        printable, line, column, base);
+            g_byte_array_unref(bytes);
             return FALSE;
+        }
+
+        value = value * base + (guint)digit;
+        count++;
+        column++;
+
+        if (count == width) {
+            if (value > 255) {
+                g_set_error(error,
+                            BINARK_TEXT_ERROR,
+                            BINARK_TEXT_ERROR_INVALID_CHARACTER,
+                            "Значение %u в строке %" G_GSIZE_FORMAT
+                            " больше 255 и не является байтом.",
+                            value, line);
+                g_byte_array_unref(bytes);
+                return FALSE;
+            }
+
+            {
+                guint8 byte = (guint8)value;
+                g_byte_array_append(bytes, &byte, 1);
+            }
+            value = 0;
+            count = 0;
         }
     }
 
-    bytes = g_byte_array_sized_new(len / 8 + 1);
-    {
-        int capacity = (int)(codec->group_bytes * 8 / codec->digit_bits);
-        groups = len / (gsize)capacity;
-
-        for (g = 0; g < groups; g++) {
-            const gchar *s = clean->str + g * (gsize)capacity;
-            int pad = 0;
-            int data_chars;
-            int bits;
-            int emit;
-            uint64_t value = 0;
-            int j;
-            int k;
-
-            while (pad < capacity && s[capacity - 1 - pad] == '=')
-                pad++;
-            data_chars = capacity - pad;
-            if (pad > 0 && g != groups - 1) {
-                g_set_error(error,
-                            BINARK_TEXT_ERROR,
-                            BINARK_TEXT_ERROR_INVALID_CHARACTER,
-                            "Недопустительные символы «=» в зашифрованной строке.");
-                goto cleanup;
-            }
-            if (data_chars == 0) {
-                g_set_error(error,
-                            BINARK_TEXT_ERROR,
-                            BINARK_TEXT_ERROR_INVALID_CHARACTER,
-                            "Пустая зашифрованная строка.");
-                goto cleanup;
-            }
-
-            for (j = 0; j < data_chars; j++) {
-                int digit = text_char_value((guchar)s[j], codec);
-
-                if (digit < 0) {
-                    g_set_error(error,
-                                BINARK_TEXT_ERROR,
-                                BINARK_TEXT_ERROR_INVALID_CHARACTER,
-                                "Недопустимый символ в зашифрованной строке.");
-                    goto cleanup;
-                }
-                value = (value << codec->digit_bits) | (uint64_t)digit;
-            }
-
-            bits = data_chars * codec->digit_bits;
-            emit = bits / 8;
-            for (k = 0; k < emit; k++) {
-                int shift = bits - 8 * (k + 1);
-                guint8 byte = (guint8)((value >> shift) & 255);
-                g_byte_array_append(bytes, &byte, 1);
-            }
-        }
+    if (count != 0) {
+        g_set_error(error,
+                    BINARK_TEXT_ERROR,
+                    BINARK_TEXT_ERROR_INCOMPLETE_BYTE,
+                    "Неполная группа: в конце осталось цифр: %u, а нужно %u.",
+                    count, width);
+        g_byte_array_unref(bytes);
+        return FALSE;
     }
 
     *bytes_out = bytes;
-    g_string_free(clean, TRUE);
     return TRUE;
-
-cleanup:
-    g_byte_array_unref(bytes);
-    g_string_free(clean, TRUE);
-    return FALSE;
 }
 
-static gboolean
-text_decode_base_impl(const gchar *input,
-                      gsize input_len,
-                      const TextCodec *codec,
-                      gchar **text,
-                      gsize *text_len,
-                      GError **error)
+gchar *
+binark_text_encode_base(const gchar *text,
+                        gsize text_len,
+                        guint base,
+                        gboolean separated,
+                        guint bytes_per_line,
+                        gsize *out_len)
+{
+    if (base == 2)
+        return binark_text_encode(text, text_len, separated, bytes_per_line,
+                                  out_len);
+    return text_encode_base_bytes_impl((const guchar *)text, text_len, base,
+                                       separated, bytes_per_line, out_len);
+}
+
+gboolean
+binark_text_decode_base(const gchar *input,
+                        gsize input_len,
+                        guint base,
+                        gchar **text,
+                        gsize *text_len,
+                        GError **error)
 {
     GByteArray *bytes = NULL;
     const gchar *invalid = NULL;
-    gchar *result = NULL;
+    gchar *result;
+
+    g_return_val_if_fail(text != NULL, FALSE);
 
     *text = NULL;
     if (text_len != NULL)
         *text_len = 0;
 
-    if (!text_decoded_from_base(input, input_len, codec, &bytes, error)) {
-        g_clear_error(error);
-        g_set_error(error,
-                    BINARK_TEXT_ERROR,
-                    BINARK_TEXT_ERROR_INVALID_CHARACTER,
-                    "Некорректное зашифрованное значение.");
+    if (base == 2)
+        return binark_text_decode(input, input_len, text, text_len, error);
+
+    if (!text_decode_base_bytes_impl(input, input_len, base, &bytes, error))
         return FALSE;
-    }
 
-    if (bytes->len == 0) {
-        result = g_strdup("");
-        *text = result;
-        *text_len = 0;
-        g_byte_array_unref(bytes);
-        return TRUE;
-    }
-
-    if (memchr(bytes->data, '\0', bytes->len) != NULL) {
+    if (bytes->len > 0 && memchr(bytes->data, '\0', bytes->len) != NULL) {
         g_set_error(error,
                     BINARK_TEXT_ERROR,
                     BINARK_TEXT_ERROR_NUL_BYTE,
@@ -430,56 +451,34 @@ text_decode_base_impl(const gchar *input,
     }
 
     result = g_strndup((const gchar *)bytes->data, bytes->len);
-    *text = result;
-    *text_len = bytes->len;
+    if (text_len != NULL)
+        *text_len = bytes->len;
     g_byte_array_unref(bytes);
+
+    *text = result;
     return TRUE;
 }
 
 gchar *
-binark_text_encode_base64(const gchar *text, gsize text_len, gsize *out_len)
+binark_text_encode_base_bytes(const GByteArray *bytes,
+                              guint base,
+                              gboolean separated,
+                              guint bytes_per_line,
+                              gsize *out_len)
 {
-    GByteArray *bytes = g_byte_array_sized_new(text_len);
-    gchar *result;
-
-    for (gsize i = 0; i < text_len; i++) {
-        guchar byte = (guchar)text[i];
-        g_byte_array_append(bytes, &byte, 1);
-    }
-    result = text_encoded_from_bytes(bytes->data, bytes->len,
-                                    &text_codecs[0], out_len);
-    g_byte_array_unref(bytes);
-    return result;
+    if (bytes == NULL)
+        return text_encode_base_bytes_impl(NULL, 0, base, separated,
+                                           bytes_per_line, out_len);
+    return text_encode_base_bytes_impl(bytes->data, bytes->len, base,
+                                       separated, bytes_per_line, out_len);
 }
 
 gboolean
-binark_text_decode_base64(const gchar *input, gsize input_len, gchar **text,
-                          gsize *text_len, GError **error)
+binark_text_decode_base_bytes(const gchar *input,
+                              gsize input_len,
+                              guint base,
+                              GByteArray **bytes,
+                              GError **error)
 {
-    return text_decode_base_impl(input, input_len, &text_codecs[0], text,
-                                 text_len, error);
-}
-
-gchar *
-binark_text_encode_base32(const gchar *text, gsize text_len, gsize *out_len)
-{
-    GByteArray *bytes = g_byte_array_sized_new(text_len);
-    gchar *result;
-
-    for (gsize i = 0; i < text_len; i++) {
-        guchar byte = (guchar)text[i];
-        g_byte_array_append(bytes, &byte, 1);
-    }
-    result = text_encoded_from_bytes(bytes->data, bytes->len,
-                                    &text_codecs[1], out_len);
-    g_byte_array_unref(bytes);
-    return result;
-}
-
-gboolean
-binark_text_decode_base32(const gchar *input, gsize input_len, gchar **text,
-                          gsize *text_len, GError **error)
-{
-    return text_decode_base_impl(input, input_len, &text_codecs[1], text,
-                                 text_len, error);
+    return text_decode_base_bytes_impl(input, input_len, base, bytes, error);
 }

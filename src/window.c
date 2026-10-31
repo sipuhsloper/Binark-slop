@@ -21,6 +21,7 @@ typedef struct {
     gboolean encode;
     gboolean compact;
     guint bytes_per_line;
+    guint base;
     guint64 input_size;
     GThread *thread;
     gint ref_count;
@@ -109,6 +110,7 @@ struct _BinarkWindow {
     GtkButton *file_input_button;
     GtkButton *file_output_button;
     GtkButton *file_convert_button;
+    GtkDropDown *file_base;
     GtkButton *file_swap_button;
     GtkButton *file_clear_button;
     GtkButton *file_cancel_button;
@@ -177,6 +179,8 @@ static void update_text_direction(BinarkWindow *self);
 static void on_text_output_base_changed(GObject *object, GParamSpec *pspec,
                                        gpointer user_data);
 static void update_file_direction(BinarkWindow *self);
+static void on_file_base_changed(GObject *object, GParamSpec *pspec,
+                                 gpointer user_data);
 static void update_text_stats(BinarkWindow *self);
 static void update_file_warning(BinarkWindow *self);
 static void update_number_flow(BinarkWindow *self);
@@ -426,36 +430,35 @@ on_text_buffer_changed(GtkTextBuffer *buffer, gpointer user_data)
     update_text_stats(BINARK_WINDOW(user_data));
 }
 
-static const gchar *
-text_format_name(guint kind)
-{
-    switch (kind) {
-    case 1: return "Base64";
-    case 2: return "Base32";
-    default: return "Бинарное представление";
-    }
-}
-
 static guint
-text_format_value(GtkDropDown *dropdown)
+text_base_value(GtkDropDown *dropdown)
 {
     guint index = gtk_drop_down_get_selected(dropdown);
 
-    if (index == GTK_INVALID_LIST_POSITION || index > 2)
-        return 0;
-    return index;
+    if (index == GTK_INVALID_LIST_POSITION || index >= G_N_ELEMENTS(number_bases))
+        return 2;
+    return number_bases[index];
 }
 
 static GtkDropDown *
-new_text_format_dropdown(guint selected)
+new_text_base_dropdown(guint selected_base)
 {
     GtkStringList *model;
     GtkWidget *dropdown;
+    guint i;
+    guint selected = 0;
 
     model = gtk_string_list_new(NULL);
-    gtk_string_list_append(model, "Бинарное представление");
-    gtk_string_list_append(model, "Base64");
-    gtk_string_list_append(model, "Base32");
+    for (i = 0; i < G_N_ELEMENTS(number_bases); i++) {
+        gchar *label = number_base_label(number_bases[i]);
+
+        gtk_string_list_append(model, label);
+        g_free(label);
+
+        if (number_bases[i] == selected_base)
+            selected = i;
+    }
+
     dropdown = gtk_drop_down_new(G_LIST_MODEL(model), NULL);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(dropdown), selected);
     g_object_unref(model);
@@ -465,31 +468,27 @@ new_text_format_dropdown(guint selected)
 static void
 update_text_direction(BinarkWindow *self)
 {
-    guint kind = text_format_value(self->text_output_base);
-    const gchar *source_title;
-    const gchar *result_title;
+    guint base = text_base_value(self->text_output_base);
+    gchar *label = number_base_label(base);
     gchar *flow;
 
     if (self->text_encode) {
-        source_title = "Текст";
-        result_title = text_format_name(kind);
-        flow = g_strdup_printf("Текст → %s",
-                               kind == 0 ? "биты" : text_format_name(kind));
+        gtk_label_set_text(self->text_source_title, "Текст");
+        gtk_label_set_text(self->text_result_title, label);
+        flow = g_strdup_printf("Текст → %s", label);
         gtk_text_view_set_monospace(GTK_TEXT_VIEW(self->text_source), FALSE);
         gtk_text_view_set_monospace(GTK_TEXT_VIEW(self->text_result), TRUE);
     } else {
-        source_title = text_format_name(kind);
-        result_title = "Текст";
-        flow = g_strdup_printf("%s → текст",
-                               kind == 0 ? "биты" : text_format_name(kind));
+        gtk_label_set_text(self->text_source_title, label);
+        gtk_label_set_text(self->text_result_title, "Текст");
+        flow = g_strdup_printf("%s → текст", label);
         gtk_text_view_set_monospace(GTK_TEXT_VIEW(self->text_source), TRUE);
         gtk_text_view_set_monospace(GTK_TEXT_VIEW(self->text_result), FALSE);
     }
 
-    gtk_label_set_text(self->text_source_title, source_title);
-    gtk_label_set_text(self->text_result_title, result_title);
     gtk_label_set_text(self->text_flow, flow);
     g_free(flow);
+    g_free(label);
     hide_text_error(self);
     update_text_stats(self);
 }
@@ -563,8 +562,8 @@ build_text_page(BinarkWindow *self)
     gtk_box_append(GTK_BOX(page), source_panel);
 
     format_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    format_label = gtk_label_new("Формат результата");
-    self->text_output_base = GTK_DROP_DOWN(new_text_format_dropdown(0));
+    format_label = gtk_label_new("Система счисления");
+    self->text_output_base = new_text_base_dropdown(2);
     g_signal_connect(self->text_output_base, "notify::selected",
                      G_CALLBACK(on_text_output_base_changed), self);
     gtk_box_append(GTK_BOX(format_row), GTK_WIDGET(format_label));
@@ -895,6 +894,14 @@ on_file_compact_toggled(GtkCheckButton *button, gpointer user_data)
 }
 
 static void
+on_file_base_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
+{
+    (void)object;
+    (void)pspec;
+    update_file_direction(BINARK_WINDOW(user_data));
+}
+
+static void
 on_file_choose_input_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
@@ -950,6 +957,8 @@ build_file_page(BinarkWindow *self)
     GtkWidget *result_panel = new_panel("binark-result");
     GtkWidget *source_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     GtkWidget *output_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *base_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *base_label = gtk_label_new("Система счисления");
     GtkWidget *progress_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     GtkWidget *progress_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     GtkWidget *actions;
@@ -998,6 +1007,15 @@ build_file_page(BinarkWindow *self)
     gtk_box_append(GTK_BOX(source_panel),
                    GTK_WIDGET(self->file_error_revealer));
     gtk_box_append(GTK_BOX(page), source_panel);
+
+    gtk_widget_set_hexpand(base_label, TRUE);
+    gtk_widget_set_valign(base_label, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(base_row), base_label);
+    self->file_base = new_text_base_dropdown(2);
+    g_signal_connect(self->file_base, "notify::selected",
+                     G_CALLBACK(on_file_base_changed), self);
+    gtk_box_append(GTK_BOX(base_row), GTK_WIDGET(self->file_base));
+    gtk_box_append(GTK_BOX(page), base_row);
 
     gtk_box_append(GTK_BOX(result_panel),
                    new_label("Куда сохранить", "binark-panel-title"));
@@ -1251,33 +1269,26 @@ text_convert(BinarkWindow *self)
 {
     gchar *source = text_view_get_text(self->text_source);
     gsize source_len = strlen(source);
-    guint format = text_format_value(self->text_output_base);
+    guint base = text_base_value(self->text_output_base);
+    gchar *label = number_base_label(base);
     GError *error = NULL;
 
     hide_text_error(self);
 
     if (self->text_encode) {
-        gchar *result = NULL;
+        gboolean separated = g_settings_get_boolean(self->settings,
+                                                     "separated-bits");
+        guint bytes_per_line = (guint)g_settings_get_int(self->settings,
+                                                          "bytes-per-line");
         gsize result_len = 0;
-        gchar *summary = NULL;
+        gchar *result;
+        gchar *summary;
 
-        if (format == 0) {
-            gboolean separated = g_settings_get_boolean(self->settings,
-                                                         "separated-bits");
-            guint bytes_per_line = (guint)g_settings_get_int(self->settings,
-                                                              "bytes-per-line");
-            gsize encoded_len = 0;
-            result = binark_text_encode(source, source_len, separated,
-                                       bytes_per_line, &encoded_len);
-            result_len = encoded_len;
-        } else if (format == 1) {
-            result = binark_text_encode_base64(source, source_len, &result_len);
-        } else {
-            result = binark_text_encode_base32(source, source_len, &result_len);
-        }
+        result = binark_text_encode_base(source, source_len, base, separated,
+                                         bytes_per_line, &result_len);
 
         set_text_view_text(self->text_result, result);
-        if (format == 0) {
+        if (base == 2) {
             summary = g_strdup_printf("%" G_GSIZE_FORMAT " симв. → "
                                       "%" G_GSIZE_FORMAT " байт → "
                                       "%" G_GSIZE_FORMAT " бит",
@@ -1286,11 +1297,14 @@ text_convert(BinarkWindow *self)
                                       result_len);
         } else {
             summary = g_strdup_printf("%" G_GSIZE_FORMAT " байт → %s",
-                                      source_len, text_format_name(format));
+                                      source_len, label);
         }
-        add_history(self, BINARK_HISTORY_TEXT,
-                    g_strdup_printf("Текст → %s", text_format_name(format)),
-                    summary);
+        {
+            gchar *history = g_strdup_printf("Текст → %s", label);
+
+            add_history(self, BINARK_HISTORY_TEXT, history, summary);
+            g_free(history);
+        }
         g_free(summary);
         if (g_settings_get_boolean(self->settings, "copy-after-convert") &&
             result_len > 0) {
@@ -1301,50 +1315,28 @@ text_convert(BinarkWindow *self)
     } else {
         gchar *decoded = NULL;
         gsize decoded_len = 0;
-        gchar *summary = NULL;
+        gchar *summary;
+        gchar *history;
 
-        if (format == 0) {
-            if (!binark_text_decode(source, source_len, &decoded, &decoded_len,
-                                    &error)) {
-                set_text_view_text(self->text_result, "");
-                show_text_error(self, error->message);
-                g_clear_error(&error);
-                update_text_stats(self);
-                g_free(source);
-                return;
-            }
-            summary = g_strdup_printf("%" G_GSIZE_FORMAT " байт → "
-                                     "%" G_GSIZE_FORMAT " симв.",
-                                     decoded_len,
-                                     binark_utf8_char_count(decoded));
-        } else if (format == 1) {
-            if (!binark_text_decode_base64(source, source_len, &decoded,
-                                           &decoded_len, &error)) {
-                set_text_view_text(self->text_result, "");
-                show_text_error(self, error->message);
-                g_clear_error(&error);
-                update_text_stats(self);
-                g_free(source);
-                return;
-            }
-            summary = g_strdup_printf("%s → симв.", text_format_name(format));
-        } else {
-            if (!binark_text_decode_base32(source, source_len, &decoded,
-                                           &decoded_len, &error)) {
-                set_text_view_text(self->text_result, "");
-                show_text_error(self, error->message);
-                g_clear_error(&error);
-                update_text_stats(self);
-                g_free(source);
-                return;
-            }
-            summary = g_strdup_printf("%s → симв.", text_format_name(format));
+        if (!binark_text_decode_base(source, source_len, base, &decoded,
+                                     &decoded_len, &error)) {
+            set_text_view_text(self->text_result, "");
+            show_text_error(self, error->message);
+            g_clear_error(&error);
+            update_text_stats(self);
+            g_free(label);
+            g_free(source);
+            return;
         }
 
         set_text_view_text(self->text_result, decoded);
-        add_history(self, BINARK_HISTORY_TEXT,
-                    g_strdup_printf("%s → текст", text_format_name(format)),
-                    summary);
+        summary = g_strdup_printf("%" G_GSIZE_FORMAT " байт → "
+                                  "%" G_GSIZE_FORMAT " симв.",
+                                  decoded_len,
+                                  binark_utf8_char_count(decoded));
+        history = g_strdup_printf("%s → текст", label);
+        add_history(self, BINARK_HISTORY_TEXT, history, summary);
+        g_free(history);
         g_free(summary);
         if (g_settings_get_boolean(self->settings, "copy-after-convert") &&
             decoded_len > 0) {
@@ -1352,9 +1344,10 @@ text_convert(BinarkWindow *self)
             show_toast(self, "Результат скопирован в буфер обмена.");
         }
         g_free(decoded);
-        }
+    }
 
     update_text_stats(self);
+    g_free(label);
     g_free(source);
 }
 
@@ -1576,9 +1569,32 @@ file_job_unref(FileJob *job)
     g_free(job);
 }
 
+static const gchar *
+digits_instrumental(guint count)
+{
+    return (count % 10 == 1 && count % 100 != 11) ? "цифрой" : "цифрами";
+}
+
+static const gchar *
+digits_genitive(guint count)
+{
+    if (count % 10 == 1 && count % 100 != 11)
+        return "цифра";
+    if (count % 10 >= 2 && count % 10 <= 4 &&
+        (count % 100 < 12 || count % 100 > 14))
+        return "цифры";
+    return "цифр";
+}
+
 static void
 update_file_warning(BinarkWindow *self)
 {
+    guint base = text_base_value(self->file_base);
+    guint width = binark_text_base_width(base);
+
+    if (width == 0)
+        width = 8;
+
     if (self->file_encode) {
         gboolean compact = gtk_check_button_get_active(self->file_compact) ||
                            !g_settings_get_boolean(self->settings,
@@ -1588,72 +1604,113 @@ update_file_warning(BinarkWindow *self)
         guint64 estimate;
         gchar *estimate_text;
         gchar *text;
+        gchar *label = number_base_label(base);
 
         gtk_widget_add_css_class(GTK_WIDGET(self->file_warning),
                                  "binark-warning");
         if (self->file_input_path == NULL) {
-            gtk_label_set_text(self->file_warning,
-                               "Текстовое представление будет примерно в 9 "
-                               "раз больше исходного файла. Для больших "
-                               "файлов выбирайте компактный формат.");
+            text = g_strdup_printf("Каждый байт будет записан %u %s "
+                                   "в системе «%s». Для больших файлов "
+                                   "выбирайте компактный формат.",
+                                   width, digits_instrumental(width), label);
+            gtk_label_set_text(self->file_warning, text);
+            g_free(text);
+            g_free(label);
             return;
         }
 
-        estimate = binark_file_encoded_size(self->file_input_size, compact,
-                                            bytes_per_line);
+        estimate = binark_file_encoded_size_base(self->file_input_size, base,
+                                                 compact, bytes_per_line);
         estimate_text = binark_format_size(estimate);
-        text = g_strdup_printf("Текстовый результат займёт около %s — "
-                               "примерно в 9 раз больше исходных %s.",
-                               estimate_text,
-                               self->file_input_size < 1024
-                                   ? "байт"
-                                   : "данных");
+        text = g_strdup_printf("Текстовый результат займёт около %s: "
+                               "%u %s на байт в системе «%s».",
+                               estimate_text, width, digits_genitive(width),
+                               label);
         gtk_label_set_text(self->file_warning, text);
         g_free(text);
         g_free(estimate_text);
+        g_free(label);
     } else {
+        gchar *text;
+
         gtk_widget_remove_css_class(GTK_WIDGET(self->file_warning),
                                     "binark-warning");
-        gtk_label_set_text(self->file_warning,
-                           "При восстановлении проверяется, что каждый байт "
-                           "состоит ровно из восьми бит. Повреждённый файл "
-                           "не заменит существующий результат.");
+        text = g_strdup_printf("При восстановлении каждая группа из %u "
+                               "цифр проверяется как значение байта (0–255). "
+                               "Повреждённый файл не заменит существующий "
+                               "результат.", width);
+        gtk_label_set_text(self->file_warning, text);
+        g_free(text);
     }
 }
 
 static void
 update_file_direction(BinarkWindow *self)
 {
+    guint base = text_base_value(self->file_base);
+    gchar *label = number_base_label(base);
+    gchar *flow;
+    gchar *title;
+
     if (self->file_encode) {
-        gtk_label_set_text(self->file_flow, "Файл → биты");
+        flow = g_strdup_printf("Файл → %s", label);
+        gtk_label_set_text(self->file_flow, flow);
         gtk_label_set_text(self->file_input_title, "Исходный файл");
         gtk_label_set_text(self->file_output_title,
-                           "Сохранить бинарный текст в");
+                           "Сохранить текст в системе счисления в");
         gtk_widget_set_sensitive(GTK_WIDGET(self->file_compact), TRUE);
     } else {
-        gtk_label_set_text(self->file_flow, "Биты → файл");
-        gtk_label_set_text(self->file_input_title, "Файл с битами");
+        flow = g_strdup_printf("%s → файл", label);
+        gtk_label_set_text(self->file_flow, flow);
+        title = g_strdup_printf("Файл с текстом в системе «%s»", label);
+        gtk_label_set_text(self->file_input_title, title);
+        g_free(title);
         gtk_label_set_text(self->file_output_title,
                            "Сохранить восстановленный файл в");
-    gtk_widget_set_sensitive(GTK_WIDGET(self->file_compact),
-                             self->file_encode);
+        gtk_widget_set_sensitive(GTK_WIDGET(self->file_compact), FALSE);
     }
+
+    gtk_widget_set_sensitive(GTK_WIDGET(self->file_base),
+                             self->file_job == NULL);
+    g_free(flow);
+    g_free(label);
     hide_file_error(self);
     update_file_warning(self);
 }
 
 static gchar *
-suggested_output_name(const gchar *input_path, gboolean encode)
+file_suffix_for_base(guint base)
 {
+    if (base == 2)
+        return g_strdup(".bits.txt");
+    return g_strdup_printf(".base%u.txt", base);
+}
+
+static gchar *
+suggested_output_name(const gchar *input_path, gboolean encode, guint base)
+{
+    gchar *suffix = file_suffix_for_base(base);
     gchar *basename;
     gchar *result;
 
-    if (input_path == NULL)
-        return g_strdup(encode ? "binark-output.bits.txt" : "binark-output.bin");
+    if (input_path == NULL) {
+        if (encode)
+            result = g_strconcat("binark-output", suffix, NULL);
+        else
+            result = g_strdup("binark-output.bin");
+        g_free(suffix);
+        return result;
+    }
 
     basename = g_path_get_basename(input_path);
     if (encode) {
-        result = g_strconcat(basename, ".bits.txt", NULL);
+        result = g_strconcat(basename, suffix, NULL);
+    } else if (g_str_has_suffix(basename, suffix)) {
+        result = g_strndup(basename, strlen(basename) - strlen(suffix));
+        if (*result == '\0') {
+            g_free(result);
+            result = g_strdup("binark-output.bin");
+        }
     } else if (g_str_has_suffix(basename, ".bits.txt")) {
         result = g_strndup(basename, strlen(basename) - strlen(".bits.txt"));
         if (*result == '\0') {
@@ -1665,6 +1722,7 @@ suggested_output_name(const gchar *input_path, gboolean encode)
     }
 
     g_free(basename);
+    g_free(suffix);
     return result;
 }
 
@@ -1773,7 +1831,7 @@ file_choose_input(BinarkWindow *self)
     dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog,
                               self->file_encode ? "Выбрать файл"
-                                                : "Выбрать файл с битами");
+                                                : "Выбрать файл с текстом");
     gtk_file_dialog_set_accept_label(dialog, "Открыть");
     gtk_file_dialog_open(dialog, GTK_WINDOW(self), NULL,
                          file_input_finish, g_object_ref(self));
@@ -1834,12 +1892,13 @@ file_choose_output(BinarkWindow *self)
     dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog,
                               self->file_encode
-                                  ? "Сохранить бинарный текст"
+                                  ? "Сохранить текст в системе счисления"
                                   : "Сохранить восстановленный файл");
     gtk_file_dialog_set_accept_label(dialog, "Сохранить");
 
     suggested = suggested_output_name(self->file_input_path,
-                                      self->file_encode);
+                                      self->file_encode,
+                                      text_base_value(self->file_base));
     gtk_file_dialog_set_initial_name(dialog, suggested);
     g_free(suggested);
 
@@ -1910,13 +1969,16 @@ on_file_job_done(gpointer user_data)
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_swap_button), TRUE);
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_clear_button), TRUE);
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_compact), self->file_encode);
+    gtk_widget_set_sensitive(GTK_WIDGET(self->file_base), TRUE);
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_cancel_button), FALSE);
 
     if (job->success) {
         gchar *basename = g_path_get_basename(job->output_path);
         gchar *message = g_strdup_printf("Файл сохранён: %s", basename);
-        gchar *direction = job->encode ? g_strdup("Файл → биты")
-                                       : g_strdup("Биты → файл");
+        gchar *base_label = number_base_label(job->base);
+        gchar *direction = job->encode
+                               ? g_strdup_printf("Файл → %s", base_label)
+                               : g_strdup_printf("%s → файл", base_label);
         gchar *summary;
         struct stat output_info;
 
@@ -1942,6 +2004,7 @@ on_file_job_done(gpointer user_data)
         add_history(self, BINARK_HISTORY_FILE, direction, summary);
         g_free(summary);
         g_free(direction);
+        g_free(base_label);
         g_free(message);
         g_free(basename);
         hide_file_error(self);
@@ -2015,12 +2078,14 @@ file_job_worker(gpointer user_data)
     gboolean ok;
 
     if (job->encode) {
-        ok = binark_file_encode(job->input_path, job->output_path,
-                                job->compact, job->bytes_per_line,
-                                file_progress_cb, job, &error);
+        ok = binark_file_encode_base(job->input_path, job->output_path,
+                                     job->base, job->compact,
+                                     job->bytes_per_line,
+                                     file_progress_cb, job, &error);
     } else {
-        ok = binark_file_decode(job->input_path, job->output_path,
-                                file_progress_cb, job, &error);
+        ok = binark_file_decode_base(job->input_path, job->output_path,
+                                     job->base, file_progress_cb, job,
+                                     &error);
     }
 
     job->success = ok;
@@ -2051,6 +2116,7 @@ file_start_job(BinarkWindow *self)
     job->compact = compact;
     job->bytes_per_line = (guint)g_settings_get_int(self->settings,
                                                     "bytes-per-line");
+    job->base = text_base_value(self->file_base);
     job->input_size = self->file_input_size;
     job->ref_count = 1;
 
@@ -2074,6 +2140,7 @@ file_start_job(BinarkWindow *self)
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_swap_button), FALSE);
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_clear_button), FALSE);
     gtk_widget_set_sensitive(GTK_WIDGET(self->file_compact), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(self->file_base), FALSE);
 
     job->thread = g_thread_new("binark-file", file_job_worker, job);
 }
@@ -2616,10 +2683,10 @@ search_rebuild(BinarkWindow *self)
         const gchar *kind;
         gboolean encode;
     } functions[] = {
-        {"Текст → биты", "Кодировать UTF-8 текст", "text-encode", TRUE},
-        {"Биты → текст", "Декодировать UTF-8 текст", "text-decode", FALSE},
-        {"Числа", "Двоичная, восьмеричная, десятичная и шестнадцатеричная системы", "numbers", FALSE},
-        {"Файлы", "Кодировать или восстановить файл потоком", "files", FALSE},
+        {"Текст → система счисления", "Кодировать UTF-8 текст", "text-encode", TRUE},
+        {"Система счисления → текст", "Декодировать текст", "text-decode", FALSE},
+        {"Числа", "Основания 2–12, 16, 32 и 64", "numbers", FALSE},
+        {"Файлы", "Кодировать или восстановить файл потоком в выбранной системе", "files", FALSE},
         {"Настройки", "Тема, форматирование, история и поведение", "preferences", FALSE},
         {"История", "Последние операции без содержимого", "history", FALSE},
         {"О программе", "Версия, технологии и лицензия", "about", FALSE}

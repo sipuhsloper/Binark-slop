@@ -9,7 +9,7 @@ G_BEGIN_DECLS
 #define BINARK_SETTINGS_SCHEMA "com.binark.Binark"
 #define BINARK_APPLICATION_ID "com.binark.Binark"
 #define BINARK_APPLICATION_NAME "Binark"
-#define BINARK_VERSION "1.0.0"
+#define BINARK_VERSION "1.1.0"
 
 GSettings *binark_settings_new(void);
 void binark_settings_apply_theme(GSettings *settings);
